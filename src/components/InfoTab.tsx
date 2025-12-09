@@ -6,13 +6,11 @@ const InfoTab = () => {
       name: "Instagram",
       icon: Instagram,
       url: "#", // سيتم إضافة الرابط لاحقاً
-      placeholder: true,
     },
     {
       name: "Telegram",
       icon: Send,
       url: "#", // سيتم إضافة الرابط لاحقاً
-      placeholder: true,
     },
   ];
 
@@ -20,9 +18,9 @@ const InfoTab = () => {
     <div className="min-h-screen flex flex-col items-center px-6 py-12 pb-28" dir="rtl">
       <div className="w-full max-w-md mx-auto">
         {/* Profile Section */}
-        <div className="text-center mb-10 animate-fade-up">
+        <div className="text-center mb-10">
           {/* Avatar */}
-          <div className="relative w-40 h-40 mx-auto mb-6">
+          <div className="relative w-40 h-40 mx-auto mb-6 animate-scale-in">
             <div className="w-full h-full rounded-full bg-gradient-to-br from-accent to-secondary flex items-center justify-center overflow-hidden border-4 border-card shadow-xl">
               <img 
                 src="https://api.dicebear.com/7.x/avataaars/svg?seed=mohimen&backgroundColor=b6e3f4"
@@ -33,17 +31,17 @@ const InfoTab = () => {
           </div>
 
           {/* Name and Bio */}
-          <h2 className="text-2xl font-bold text-foreground mb-2">
+          <h2 className="text-2xl font-bold text-foreground mb-2 animate-slide-in animation-delay-100">
             mohimen
           </h2>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-muted-foreground text-sm animate-slide-in animation-delay-200">
             👾 Beginner programmer | 🎮 Gamer
           </p>
         </div>
 
         {/* Contact Section */}
-        <div className="animate-fade-up" style={{ animationDelay: "200ms" }}>
-          <h3 className="text-xl font-bold text-primary text-center mb-6">
+        <div>
+          <h3 className="text-xl font-bold text-primary text-center mb-6 animate-slide-in animation-delay-300">
             تواصل معي
           </h3>
 
@@ -56,10 +54,10 @@ const InfoTab = () => {
                   href={link.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-4 p-4 rounded-xl glass-card hover:shadow-lg transition-all duration-300 group"
-                  style={{ animationDelay: `${(index + 1) * 100}ms` }}
+                  className="flex items-center gap-4 p-4 rounded-xl glass-card hover:shadow-lg transition-all duration-200 group animate-slide-up"
+                  style={{ animationDelay: `${(index + 4) * 80}ms` }}
                 >
-                  <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                  <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-200">
                     <Icon size={20} />
                   </div>
                   <span className="font-medium text-foreground">
