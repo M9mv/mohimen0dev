@@ -1,19 +1,27 @@
-import Header from "@/components/Header";
-import HeroSection from "@/components/HeroSection";
-import ProjectsSection from "@/components/ProjectsSection";
-import ContactSection from "@/components/ContactSection";
-import Footer from "@/components/Footer";
+import { useState } from "react";
+import BottomNav from "@/components/BottomNav";
+import HomeTab from "@/components/HomeTab";
+import ProjectsTab from "@/components/ProjectsTab";
+import InfoTab from "@/components/InfoTab";
 
 const Index = () => {
+  const [activeTab, setActiveTab] = useState<"home" | "projects" | "info">("home");
+
+  const handleViewProjects = () => {
+    setActiveTab("projects");
+  };
+
   return (
     <div className="min-h-screen">
-      <Header />
+      {/* Content */}
       <main>
-        <HeroSection />
-        <ProjectsSection />
-        <ContactSection />
+        {activeTab === "home" && <HomeTab onViewProjects={handleViewProjects} />}
+        {activeTab === "projects" && <ProjectsTab />}
+        {activeTab === "info" && <InfoTab />}
       </main>
-      <Footer />
+
+      {/* Bottom Navigation */}
+      <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
     </div>
   );
 };
