@@ -137,8 +137,19 @@
     @apply bg-card/80 backdrop-blur-md border border-border/50 shadow-lg;
   }
 
+  /* iOS 18 Style Glass Navigation */
+  .glass-nav {
+    background: hsla(var(--card), 0.7);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid hsla(var(--border), 0.3);
+    box-shadow: 
+      0 8px 32px hsla(var(--foreground), 0.1),
+      inset 0 1px 0 hsla(var(--card), 0.5);
+  }
+
   .cta-button {
-    @apply bg-cta text-cta-foreground font-semibold px-8 py-3 rounded-lg 
+    @apply bg-cta text-cta-foreground font-semibold px-8 py-3 rounded-full
            hover:brightness-105 transition-all duration-300 
            shadow-lg hover:shadow-xl hover:-translate-y-0.5;
   }
