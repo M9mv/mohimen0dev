@@ -1,4 +1,5 @@
 import { ArrowLeft } from "lucide-react";
+import profileAvatar from "@/assets/profile-avatar.png";
 
 interface HomeTabProps {
   onViewProjects: () => void;
@@ -24,9 +25,9 @@ const HomeTab = ({ onViewProjects, onTitleClick }: HomeTabProps) => {
         <div className="relative w-48 h-48 mx-auto mb-8 animate-scale-in animation-delay-200">
           <div className="w-full h-full rounded-full bg-gradient-to-br from-accent to-secondary flex items-center justify-center overflow-hidden border-4 border-card shadow-xl">
             <img 
-              src="https://api.dicebear.com/7.x/avataaars/svg?seed=mohimen&backgroundColor=b6e3f4"
+              src={profileAvatar}
               alt="mohimen avatar"
-              className="w-36 h-36"
+              className="w-full h-full object-cover"
             />
           </div>
         </div>
