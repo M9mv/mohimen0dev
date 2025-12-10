@@ -26,7 +26,7 @@ const Admin = () => {
 
   // Profile settings
   const [socialLinks, setSocialLinks] = useState({
-    instagram: "Mqw_c",
+    instagram: "m1w_c",
     telegram: "M_lq3",
   });
 
