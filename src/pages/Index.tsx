@@ -8,7 +8,7 @@ import InfoTab from "@/components/InfoTab";
 type TabType = "home" | "projects" | "info";
 
 const defaultSocialLinks = {
-  instagram: "Mqw_c",
+  instagram: "m1w_c",
   telegram: "M_lq3",
 };
 
