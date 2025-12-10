@@ -1,16 +1,17 @@
 import { Instagram, Send } from "lucide-react";
+import profileAvatar from "@/assets/profile-avatar.png";
 
 const InfoTab = () => {
   const socialLinks = [
     {
-      name: "Instagram",
+      name: "Instagram @Mqw_c",
       icon: Instagram,
-      url: "#", // سيتم إضافة الرابط لاحقاً
+      url: "https://instagram.com/Mqw_c",
     },
     {
-      name: "Telegram",
+      name: "Telegram @M_lq3",
       icon: Send,
-      url: "#", // سيتم إضافة الرابط لاحقاً
+      url: "https://t.me/M_lq3",
     },
   ];
 
@@ -23,9 +24,9 @@ const InfoTab = () => {
           <div className="relative w-40 h-40 mx-auto mb-6 animate-scale-in">
             <div className="w-full h-full rounded-full bg-gradient-to-br from-accent to-secondary flex items-center justify-center overflow-hidden border-4 border-card shadow-xl">
               <img 
-                src="https://api.dicebear.com/7.x/avataaars/svg?seed=mohimen&backgroundColor=b6e3f4"
+                src={profileAvatar}
                 alt="mohimen avatar"
-                className="w-32 h-32"
+                className="w-full h-full object-cover"
               />
             </div>
           </div>
