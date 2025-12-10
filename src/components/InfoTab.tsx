@@ -1,20 +1,14 @@
 import { Instagram, Send } from "lucide-react";
-import profileAvatar from "@/assets/profile-avatar.png";
+import profileAvatar from "@/assets/profile-avatar.jpg";
 
-const InfoTab = () => {
-  const socialLinks = [
-    {
-      name: "Instagram @Mqw_c",
-      icon: Instagram,
-      url: "https://instagram.com/Mqw_c",
-    },
-    {
-      name: "Telegram @M_lq3",
-      icon: Send,
-      url: "https://t.me/M_lq3",
-    },
-  ];
+interface InfoTabProps {
+  socialLinks: {
+    instagram: string;
+    telegram: string;
+  };
+}
 
+const InfoTab = ({ socialLinks }: InfoTabProps) => {
   return (
     <div className="min-h-screen flex flex-col items-center px-6 py-12 pb-28" dir="rtl">
       <div className="w-full max-w-md mx-auto">
@@ -46,27 +40,27 @@ const InfoTab = () => {
             تواصل معي
           </h3>
 
-          <div className="space-y-4">
-            {socialLinks.map((link, index) => {
-              const Icon = link.icon;
-              return (
-                <a
-                  key={link.name}
-                  href={link.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-4 p-4 rounded-xl glass-card hover:shadow-lg transition-all duration-200 group animate-slide-up"
-                  style={{ animationDelay: `${(index + 4) * 80}ms` }}
-                >
-                  <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-200">
-                    <Icon size={20} />
-                  </div>
-                  <span className="font-medium text-foreground">
-                    {link.name}
-                  </span>
-                </a>
-              );
-            })}
+          <div className="flex justify-center gap-6 animate-slide-up animation-delay-400">
+            {socialLinks.instagram && (
+              <a
+                href={`https://instagram.com/${socialLinks.instagram.replace('@', '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-14 h-14 rounded-full glass-card flex items-center justify-center hover:shadow-lg hover:scale-110 transition-all duration-200 group"
+              >
+                <Instagram size={28} className="text-foreground group-hover:text-primary transition-colors" />
+              </a>
+            )}
+            {socialLinks.telegram && (
+              <a
+                href={`https://t.me/${socialLinks.telegram.replace('@', '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-14 h-14 rounded-full glass-card flex items-center justify-center hover:shadow-lg hover:scale-110 transition-all duration-200 group"
+              >
+                <Send size={28} className="text-foreground group-hover:text-primary transition-colors" />
+              </a>
+            )}
           </div>
         </div>
       </div>

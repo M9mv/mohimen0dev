@@ -1,5 +1,5 @@
 import { ArrowLeft } from "lucide-react";
-import profileAvatar from "@/assets/profile-avatar.png";
+import profileAvatar from "@/assets/profile-avatar.jpg";
 
 interface HomeTabProps {
   onViewProjects: () => void;

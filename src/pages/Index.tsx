@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import BottomNav from "@/components/BottomNav";
 import HomeTab from "@/components/HomeTab";
@@ -7,11 +7,25 @@ import InfoTab from "@/components/InfoTab";
 
 type TabType = "home" | "projects" | "info";
 
+const defaultSocialLinks = {
+  instagram: "Mqw_c",
+  telegram: "M_lq3",
+};
+
 const Index = () => {
   const [activeTab, setActiveTab] = useState<TabType>("home");
   const [isAnimating, setIsAnimating] = useState(false);
+  const [socialLinks, setSocialLinks] = useState(defaultSocialLinks);
   const navigate = useNavigate();
   
+  // Load social links from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("mohimen-social-links");
+    if (saved) {
+      setSocialLinks(JSON.parse(saved));
+    }
+  }, []);
+
   // Hidden admin access
   const clickCountRef = useRef(0);
   const lastClickTimeRef = useRef(0);
@@ -58,7 +72,7 @@ const Index = () => {
           <HomeTab onViewProjects={handleViewProjects} onTitleClick={handleTitleClick} />
         )}
         {activeTab === "projects" && <ProjectsTab onTitleClick={handleTitleClick} />}
-        {activeTab === "info" && <InfoTab />}
+        {activeTab === "info" && <InfoTab socialLinks={socialLinks} />}
       </main>
 
       {/* Bottom Navigation */}
