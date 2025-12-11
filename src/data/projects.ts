@@ -49,6 +49,15 @@ export const initialProjects: Project[] = [
     category: "Mobile App",
     technologies: ["Flutter", "Firebase"],
   },
+  {
+    id: "7",
+    title: "Notex AI – ملاحظات ذكية بالذكاء الاصطناعي",
+    description: "احفظ ونظم ملاحظاتك بسرعة وسهولة مع Notex AI. كل ملاحظاتك النصية مُلخّصة بذكاء ومرتبة بشكل عملي، لتسهيل المراجعة والوصول لأي معلومة في لحظات.",
+    image: "https://images.unsplash.com/photo-1611532736597-de2d4265fba3?w=600&h=400&fit=crop",
+    category: "AI/ML",
+    technologies: ["AI", "React", "Node.js"],
+    link: "https://ur.link/Notex",
+  },
 ];
 
 export const categories = ["All", "Web Development", "Mobile App", "Dashboard", "AI/ML"];
