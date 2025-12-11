@@ -13,6 +13,14 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
 export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [projects, setProjects] = useState<Project[]>(() => {
+    // Force reset to new projects - version 2
+    const currentVersion = "v2";
+    const savedVersion = localStorage.getItem("mohim-projects-version");
+    if (savedVersion !== currentVersion) {
+      localStorage.setItem("mohim-projects-version", currentVersion);
+      localStorage.setItem("mohim-projects", JSON.stringify(initialProjects));
+      return initialProjects;
+    }
     const saved = localStorage.getItem("mohim-projects");
     return saved ? JSON.parse(saved) : initialProjects;
   });
