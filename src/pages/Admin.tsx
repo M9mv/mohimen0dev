@@ -1,47 +1,64 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useProjects } from "@/context/ProjectContext";
-import { Project } from "@/types/project";
+import { useDBProjects, DBProject } from "@/hooks/useProjects";
+import { useSocialLinks } from "@/hooks/useSocialLinks";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { categories } from "@/data/projects";
-import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send, Image, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 const ADMIN_PIN = "1133";
+
+interface ProjectFormData {
+  title: string;
+  description: string;
+  image_url: string;
+  category: string;
+  link: string;
+}
 
 const Admin = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { projects, addProject, updateProject, deleteProject } = useProjects();
+  const { projects, loading: projectsLoading, addProject, updateProject, deleteProject } = useDBProjects();
+  const { socialLinks, loading: socialLoading, updateSocialLinks } = useSocialLinks();
+  const { settings, updateSetting } = useSiteSettings();
   
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState(false);
   
-  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [editingProject, setEditingProject] = useState<DBProject | null>(null);
   const [isCreating, setIsCreating] = useState(false);
-  const [activeSection, setActiveSection] = useState<"projects" | "profile">("projects");
-  const [formData, setFormData] = useState<Omit<Project, "id">>({
+  const [activeSection, setActiveSection] = useState<"projects" | "profile" | "settings">("projects");
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  
+  const [formData, setFormData] = useState<ProjectFormData>({
     title: "",
     description: "",
-    image: "",
+    image_url: "",
     category: categories[1],
-    technologies: [],
     link: "",
   });
-  const [techInput, setTechInput] = useState("");
 
-  // Profile settings
-  const [socialLinks, setSocialLinks] = useState({
-    instagram: "m1w_c",
-    telegram: "M_lq3",
+  const [localSocialLinks, setLocalSocialLinks] = useState({
+    instagram: "",
+    telegram: "",
   });
 
+  const [ogImage, setOgImage] = useState("");
+
   useEffect(() => {
-    const saved = localStorage.getItem("mohimen-social-links");
-    if (saved) {
-      setSocialLinks(JSON.parse(saved));
+    if (!socialLoading) {
+      setLocalSocialLinks(socialLinks);
     }
-  }, []);
+  }, [socialLinks, socialLoading]);
+
+  useEffect(() => {
+    setOgImage(settings.og_image || "");
+  }, [settings]);
 
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,36 +71,47 @@ const Admin = () => {
     }
   };
 
-  const handleSaveSocialLinks = () => {
-    localStorage.setItem("mohimen-social-links", JSON.stringify(socialLinks));
-    toast({
-      title: "تم الحفظ",
-      description: "تم حفظ روابط التواصل الاجتماعي بنجاح",
-    });
+  const handleSaveSocialLinks = async () => {
+    setSaving(true);
+    try {
+      await updateSocialLinks(localSocialLinks);
+    } catch (error) {
+      // Error handled in hook
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveOgImage = async () => {
+    setSaving(true);
+    try {
+      await updateSetting("og_image", ogImage);
+    } catch (error) {
+      // Error handled in hook
+    } finally {
+      setSaving(false);
+    }
   };
 
   const resetForm = () => {
     setFormData({
       title: "",
       description: "",
-      image: "",
+      image_url: "",
       category: categories[1],
-      technologies: [],
       link: "",
     });
-    setTechInput("");
     setEditingProject(null);
     setIsCreating(false);
   };
 
-  const handleEdit = (project: Project) => {
+  const handleEdit = (project: DBProject) => {
     setEditingProject(project);
     setFormData({
       title: project.title,
-      description: project.description,
-      image: project.image,
-      category: project.category,
-      technologies: project.technologies || [],
+      description: project.description || "",
+      image_url: project.image_url || "",
+      category: project.category || categories[1],
       link: project.link || "",
     });
     setIsCreating(false);
@@ -96,67 +124,144 @@ const Admin = () => {
     setIsCreating(true);
   };
 
-  const handleSave = () => {
-    if (!formData.title || !formData.description || !formData.image) {
+  const handleSave = async () => {
+    if (!formData.title || !formData.description || !formData.image_url) {
       toast({
-        title: "Missing Fields",
-        description: "Please fill in all required fields.",
+        title: "حقول مفقودة",
+        description: "يرجى ملء جميع الحقول المطلوبة",
         variant: "destructive",
       });
       return;
     }
 
-    if (editingProject) {
-      updateProject(editingProject.id, formData);
+    setSaving(true);
+    try {
+      if (editingProject) {
+        await updateProject(editingProject.id, {
+          title: formData.title,
+          description: formData.description,
+          image_url: formData.image_url,
+          category: formData.category,
+          link: formData.link || null,
+        });
+        toast({
+          title: "تم التحديث",
+          description: "تم تحديث المشروع بنجاح",
+        });
+      } else {
+        await addProject({
+          title: formData.title,
+          description: formData.description,
+          image_url: formData.image_url,
+          category: formData.category,
+          link: formData.link || null,
+        });
+        toast({
+          title: "تم الإنشاء",
+          description: "تم إضافة المشروع الجديد",
+        });
+      }
+      resetForm();
+    } catch (error) {
       toast({
-        title: "Project Updated",
-        description: "The project has been successfully updated.",
+        title: "خطأ",
+        description: "فشل في حفظ المشروع",
+        variant: "destructive",
       });
-    } else {
-      addProject(formData);
-      toast({
-        title: "Project Created",
-        description: "The new project has been added.",
-      });
-    }
-    resetForm();
-  };
-
-  const handleDelete = (id: string) => {
-    if (confirm("Are you sure you want to delete this project?")) {
-      deleteProject(id);
-      toast({
-        title: "Project Deleted",
-        description: "The project has been removed.",
-      });
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleAddTech = () => {
-    if (techInput.trim() && !formData.technologies?.includes(techInput.trim())) {
-      setFormData({
-        ...formData,
-        technologies: [...(formData.technologies || []), techInput.trim()],
-      });
-      setTechInput("");
+  const handleDelete = async (id: string) => {
+    if (confirm("هل أنت متأكد من حذف هذا المشروع؟")) {
+      try {
+        await deleteProject(id);
+        toast({
+          title: "تم الحذف",
+          description: "تم حذف المشروع",
+        });
+      } catch (error) {
+        toast({
+          title: "خطأ",
+          description: "فشل في حذف المشروع",
+          variant: "destructive",
+        });
+      }
     }
   };
 
-  const handleRemoveTech = (tech: string) => {
-    setFormData({
-      ...formData,
-      technologies: formData.technologies?.filter((t) => t !== tech),
-    });
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData({ ...formData, image: reader.result as string });
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${Date.now()}.${fileExt}`;
+      const filePath = `projects/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("site-images")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from("site-images")
+        .getPublicUrl(filePath);
+
+      setFormData({ ...formData, image_url: data.publicUrl });
+      toast({
+        title: "تم الرفع",
+        description: "تم رفع الصورة بنجاح",
+      });
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast({
+        title: "خطأ",
+        description: "فشل في رفع الصورة",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleOgImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const fileExt = file.name.split(".").pop();
+      const fileName = `og-image.${fileExt}`;
+      const filePath = `settings/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("site-images")
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from("site-images")
+        .getPublicUrl(filePath);
+
+      setOgImage(data.publicUrl);
+      toast({
+        title: "تم الرفع",
+        description: "تم رفع صورة OG بنجاح",
+      });
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast({
+        title: "خطأ",
+        description: "فشل في رفع الصورة",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -230,7 +335,7 @@ const Admin = () => {
                        hover:brightness-105 transition-all flex items-center gap-2"
             >
               <Plus size={20} />
-              Add Project
+              إضافة مشروع
             </button>
           )}
         </div>
@@ -238,7 +343,7 @@ const Admin = () => {
 
       {/* Tab Navigation */}
       <div className="container mx-auto px-4 py-4">
-        <div className="flex gap-2 mb-6">
+        <div className="flex gap-2 mb-6 flex-wrap">
           <button
             onClick={() => setActiveSection("projects")}
             className={`px-4 py-2 rounded-lg font-medium transition-all ${
@@ -257,9 +362,79 @@ const Admin = () => {
                 : "bg-secondary text-secondary-foreground hover:bg-accent"
             }`}
           >
-            الملف الشخصي
+            روابط التواصل
+          </button>
+          <button
+            onClick={() => setActiveSection("settings")}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              activeSection === "settings"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-secondary-foreground hover:bg-accent"
+            }`}
+          >
+            الإعدادات
           </button>
         </div>
+
+        {/* Settings Section */}
+        {activeSection === "settings" && (
+          <div className="bg-background rounded-xl p-6 border border-border shadow-lg max-w-md">
+            <div className="flex items-center gap-3 mb-6">
+              <Image className="text-primary" size={24} />
+              <h2 className="text-xl font-bold text-primary">صورة المشاركة (OG Image)</h2>
+            </div>
+            
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                هذه الصورة ستظهر عند مشاركة الموقع على Twitter وغيرها
+              </p>
+              
+              {ogImage && (
+                <img
+                  src={ogImage}
+                  alt="OG Preview"
+                  className="w-full h-40 object-cover rounded-lg border border-border"
+                />
+              )}
+              
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={ogImage}
+                  onChange={(e) => setOgImage(e.target.value)}
+                  className="flex-1 px-4 py-2 rounded-lg border border-border bg-background 
+                           focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="رابط الصورة"
+                />
+                <label className="p-2 bg-secondary rounded-lg cursor-pointer hover:bg-accent transition-colors">
+                  {uploading ? (
+                    <Loader2 size={20} className="text-secondary-foreground animate-spin" />
+                  ) : (
+                    <Upload size={20} className="text-secondary-foreground" />
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleOgImageUpload}
+                    className="hidden"
+                    disabled={uploading}
+                  />
+                </label>
+              </div>
+              
+              <button
+                onClick={handleSaveOgImage}
+                disabled={saving}
+                className="w-full bg-cta text-cta-foreground py-3 rounded-lg font-semibold 
+                         hover:brightness-105 transition-all flex items-center justify-center gap-2
+                         disabled:opacity-50"
+              >
+                {saving ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
+                حفظ التغييرات
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Profile Section */}
         {activeSection === "profile" && (
@@ -277,8 +452,8 @@ const Admin = () => {
                 </label>
                 <input
                   type="text"
-                  value={socialLinks.instagram}
-                  onChange={(e) => setSocialLinks({ ...socialLinks, instagram: e.target.value })}
+                  value={localSocialLinks.instagram}
+                  onChange={(e) => setLocalSocialLinks({ ...localSocialLinks, instagram: e.target.value })}
                   className="w-full px-4 py-2 rounded-lg border border-border bg-background 
                            focus:outline-none focus:ring-2 focus:ring-primary/50"
                   placeholder="username"
@@ -292,8 +467,8 @@ const Admin = () => {
                 </label>
                 <input
                   type="text"
-                  value={socialLinks.telegram}
-                  onChange={(e) => setSocialLinks({ ...socialLinks, telegram: e.target.value })}
+                  value={localSocialLinks.telegram}
+                  onChange={(e) => setLocalSocialLinks({ ...localSocialLinks, telegram: e.target.value })}
                   className="w-full px-4 py-2 rounded-lg border border-border bg-background 
                            focus:outline-none focus:ring-2 focus:ring-primary/50"
                   placeholder="username"
@@ -302,10 +477,12 @@ const Admin = () => {
               
               <button
                 onClick={handleSaveSocialLinks}
+                disabled={saving}
                 className="w-full bg-cta text-cta-foreground py-3 rounded-lg font-semibold 
-                         hover:brightness-105 transition-all flex items-center justify-center gap-2"
+                         hover:brightness-105 transition-all flex items-center justify-center gap-2
+                         disabled:opacity-50"
               >
-                <Save size={20} />
+                {saving ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
                 حفظ التغييرات
               </button>
             </div>
@@ -317,7 +494,10 @@ const Admin = () => {
           <div className="grid lg:grid-cols-2 gap-8">
             {/* Project List */}
             <div className="space-y-4">
-              <h2 className="text-xl font-bold text-primary mb-4">Projects ({projects.length})</h2>
+              <h2 className="text-xl font-bold text-primary mb-4">
+                المشاريع ({projects.length})
+                {projectsLoading && <Loader2 className="inline ml-2 animate-spin" size={20} />}
+              </h2>
               <div className="space-y-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-2">
                 {projects.map((project) => (
                   <div
@@ -330,7 +510,7 @@ const Admin = () => {
                   >
                     <div className="flex gap-4">
                       <img
-                        src={project.image}
+                        src={project.image_url || ""}
                         alt={project.title}
                         className="w-20 h-20 object-cover rounded-lg"
                       />
@@ -365,7 +545,7 @@ const Admin = () => {
               <div className="bg-background rounded-xl p-6 border border-border shadow-lg h-fit sticky top-24">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-primary">
-                    {editingProject ? "Edit Project" : "Create New Project"}
+                    {editingProject ? "تعديل المشروع" : "إنشاء مشروع جديد"}
                   </h2>
                   <button
                     onClick={resetForm}
@@ -379,12 +559,12 @@ const Admin = () => {
                   {/* Image Upload */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Project Image *
+                      صورة المشروع *
                     </label>
                     <div className="space-y-3">
-                      {formData.image && (
+                      {formData.image_url && (
                         <img
-                          src={formData.image}
+                          src={formData.image_url}
                           alt="Preview"
                           className="w-full h-40 object-cover rounded-lg"
                         />
@@ -392,19 +572,24 @@ const Admin = () => {
                       <div className="flex gap-2">
                         <input
                           type="text"
-                          value={formData.image}
-                          onChange={(e) => setFormData({ ...formData, image: e.target.value })}
+                          value={formData.image_url}
+                          onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
                           className="flex-1 px-4 py-2 rounded-lg border border-border bg-background 
                                    focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          placeholder="Image URL"
+                          placeholder="رابط الصورة"
                         />
                         <label className="p-2 bg-secondary rounded-lg cursor-pointer hover:bg-accent transition-colors">
-                          <Upload size={20} className="text-secondary-foreground" />
+                          {uploading ? (
+                            <Loader2 size={20} className="text-secondary-foreground animate-spin" />
+                          ) : (
+                            <Upload size={20} className="text-secondary-foreground" />
+                          )}
                           <input
                             type="file"
                             accept="image/*"
                             onChange={handleImageUpload}
                             className="hidden"
+                            disabled={uploading}
                           />
                         </label>
                       </div>
@@ -414,7 +599,7 @@ const Admin = () => {
                   {/* Title */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Title *
+                      العنوان *
                     </label>
                     <input
                       type="text"
@@ -422,14 +607,14 @@ const Admin = () => {
                       onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                       className="w-full px-4 py-2 rounded-lg border border-border bg-background 
                                focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      placeholder="Project title"
+                      placeholder="عنوان المشروع"
                     />
                   </div>
 
                   {/* Description */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Description *
+                      الوصف *
                     </label>
                     <textarea
                       value={formData.description}
@@ -437,14 +622,14 @@ const Admin = () => {
                       rows={3}
                       className="w-full px-4 py-2 rounded-lg border border-border bg-background 
                                focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                      placeholder="Project description"
+                      placeholder="وصف المشروع"
                     />
                   </div>
 
                   {/* Category */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Category
+                      التصنيف
                     </label>
                     <select
                       value={formData.category}
@@ -460,54 +645,10 @@ const Admin = () => {
                     </select>
                   </div>
 
-                  {/* Technologies */}
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
-                      Technologies
-                    </label>
-                    <div className="flex gap-2 mb-2">
-                      <input
-                        type="text"
-                        value={techInput}
-                        onChange={(e) => setTechInput(e.target.value)}
-                        onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), handleAddTech())}
-                        className="flex-1 px-4 py-2 rounded-lg border border-border bg-background 
-                                 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        placeholder="Add technology"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAddTech}
-                        className="px-4 py-2 bg-secondary text-secondary-foreground rounded-lg 
-                                 hover:bg-accent transition-colors"
-                      >
-                        Add
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {formData.technologies?.map((tech) => (
-                        <span
-                          key={tech}
-                          className="px-3 py-1 bg-accent text-accent-foreground rounded-full 
-                                   text-sm flex items-center gap-2"
-                        >
-                          {tech}
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveTech(tech)}
-                            className="hover:text-destructive"
-                          >
-                            <X size={14} />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
                   {/* Link */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Project Link (optional)
+                      رابط المشروع (اختياري)
                     </label>
                     <input
                       type="url"
@@ -522,11 +663,13 @@ const Admin = () => {
                   {/* Save Button */}
                   <button
                     onClick={handleSave}
+                    disabled={saving}
                     className="w-full bg-cta text-cta-foreground py-3 rounded-lg font-semibold 
-                             hover:brightness-105 transition-all flex items-center justify-center gap-2"
+                             hover:brightness-105 transition-all flex items-center justify-center gap-2
+                             disabled:opacity-50"
                   >
-                    <Save size={20} />
-                    {editingProject ? "Save Changes" : "Create Project"}
+                    {saving ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
+                    {editingProject ? "حفظ التغييرات" : "إنشاء المشروع"}
                   </button>
                 </div>
               </div>
@@ -539,10 +682,10 @@ const Admin = () => {
                   <Pencil size={24} className="text-primary" />
                 </div>
                 <h3 className="text-lg font-semibold text-foreground mb-2">
-                  Select a project to edit
+                  اختر مشروعاً للتعديل
                 </h3>
                 <p className="text-muted-foreground text-sm mb-4">
-                  Or create a new project using the button above.
+                  أو أنشئ مشروعاً جديداً باستخدام الزر أعلاه
                 </p>
               </div>
             )}
