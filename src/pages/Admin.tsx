@@ -6,10 +6,16 @@ import { categories } from "@/data/projects";
 import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
+const ADMIN_PIN = "1133";
+
 const Admin = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { projects, addProject, updateProject, deleteProject } = useProjects();
+  
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
   
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -36,6 +42,17 @@ const Admin = () => {
       setSocialLinks(JSON.parse(saved));
     }
   }, []);
+
+  const handlePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinInput === ADMIN_PIN) {
+      setIsAuthenticated(true);
+      setPinError(false);
+    } else {
+      setPinError(true);
+      setPinInput("");
+    }
+  };
 
   const handleSaveSocialLinks = () => {
     localStorage.setItem("mohimen-social-links", JSON.stringify(socialLinks));
@@ -142,6 +159,55 @@ const Admin = () => {
       reader.readAsDataURL(file);
     }
   };
+
+  // PIN Authentication Screen
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-card flex items-center justify-center p-4">
+        <div className="bg-background rounded-xl p-8 border border-border shadow-lg max-w-sm w-full">
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+              <User className="text-primary" size={32} />
+            </div>
+            <h1 className="text-2xl font-bold text-primary mb-2">Admin Panel</h1>
+            <p className="text-muted-foreground text-sm">أدخل رمز الدخول</p>
+          </div>
+          
+          <form onSubmit={handlePinSubmit} className="space-y-4">
+            <div>
+              <input
+                type="password"
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                placeholder="رمز الدخول"
+                className={`w-full px-4 py-3 rounded-lg border text-center text-xl tracking-widest
+                          bg-background focus:outline-none focus:ring-2 focus:ring-primary/50
+                          ${pinError ? "border-destructive" : "border-border"}`}
+                autoFocus
+              />
+              {pinError && (
+                <p className="text-destructive text-sm mt-2 text-center">رمز خاطئ، حاول مرة أخرى</p>
+              )}
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-cta text-cta-foreground py-3 rounded-lg font-semibold 
+                       hover:brightness-105 transition-all"
+            >
+              دخول
+            </button>
+          </form>
+          
+          <button
+            onClick={() => navigate("/")}
+            className="w-full mt-4 text-muted-foreground hover:text-foreground transition-colors text-sm"
+          >
+            العودة للرئيسية
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-card">
