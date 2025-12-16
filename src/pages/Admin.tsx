@@ -8,7 +8,7 @@ import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
-const ADMIN_PIN = "1133";
+const ADMIN_PIN = "221";
 
 interface ProjectFormData {
   title: string;
