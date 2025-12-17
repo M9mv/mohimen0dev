@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 interface TOTPLoginProps {
   secret: string;
-  onSuccess: () => void;
+  onSuccess: (code: string) => void;
   onBack: () => void;
 }
 
@@ -30,13 +30,15 @@ const TOTPLogin = ({ secret, onSuccess, onBack }: TOTPLoginProps) => {
       if (fnError) throw fnError;
 
       if (data.valid) {
-        onSuccess();
+        onSuccess(code);
       } else {
         setError(true);
         setCode("");
         toast({
-          title: "رمز خاطئ",
-          description: "الرمز غير صحيح، حاول مرة أخرى",
+          title: data.rateLimited ? "محاولات كثيرة" : "رمز خاطئ",
+          description: data.rateLimited 
+            ? "انتظر 5 دقائق قبل المحاولة مرة أخرى" 
+            : "الرمز غير صحيح، حاول مرة أخرى",
           variant: "destructive",
         });
       }

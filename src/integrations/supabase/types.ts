@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      auth_attempts: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          ip_address: string
+          success: boolean
+        }
+        Insert: {
+          action?: string
+          created_at?: string
+          id?: string
+          ip_address: string
+          success?: boolean
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          ip_address?: string
+          success?: boolean
+        }
+        Relationships: []
+      }
       projects: {
         Row: {
           category: string | null

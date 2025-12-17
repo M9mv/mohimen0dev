@@ -1,1 +1,7 @@
 project_id = "iyombfeydzficqpbhfhr"
+
+[functions.totp-verify]
+verify_jwt = false
+
+[functions.admin-operations]
+verify_jwt = false
