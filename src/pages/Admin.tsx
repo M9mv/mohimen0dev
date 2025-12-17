@@ -4,11 +4,11 @@ import { useDBProjects, DBProject } from "@/hooks/useProjects";
 import { useSocialLinks } from "@/hooks/useSocialLinks";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { categories } from "@/data/projects";
-import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send, Image, Loader2 } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send, Image, Loader2, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-
-const ADMIN_PIN = "221";
+import TOTPSetup from "@/components/TOTPSetup";
+import TOTPLogin from "@/components/TOTPLogin";
 
 interface ProjectFormData {
   title: string;
@@ -25,9 +25,8 @@ const Admin = () => {
   const { socialLinks, loading: socialLoading, updateSocialLinks } = useSocialLinks();
   const { settings, updateSetting } = useSiteSettings();
   
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [pinInput, setPinInput] = useState("");
-  const [pinError, setPinError] = useState(false);
+  const [authState, setAuthState] = useState<"loading" | "setup" | "login" | "authenticated">("loading");
+  const [totpSecret, setTotpSecret] = useState("");
   
   const [editingProject, setEditingProject] = useState<DBProject | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -50,6 +49,33 @@ const Admin = () => {
 
   const [ogImage, setOgImage] = useState("");
 
+  // Check for existing TOTP secret on mount
+  useEffect(() => {
+    const checkTOTPSecret = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("site_settings")
+          .select("value")
+          .eq("key", "totp_secret")
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (data?.value) {
+          setTotpSecret(data.value);
+          setAuthState("login");
+        } else {
+          setAuthState("setup");
+        }
+      } catch (error) {
+        console.error("Error checking TOTP:", error);
+        setAuthState("setup");
+      }
+    };
+
+    checkTOTPSecret();
+  }, []);
+
   useEffect(() => {
     if (!socialLoading) {
       setLocalSocialLinks(socialLinks);
@@ -59,17 +85,6 @@ const Admin = () => {
   useEffect(() => {
     setOgImage(settings.og_image || "");
   }, [settings]);
-
-  const handlePinSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pinInput === ADMIN_PIN) {
-      setIsAuthenticated(true);
-      setPinError(false);
-    } else {
-      setPinError(true);
-      setPinInput("");
-    }
-  };
 
   const handleSaveSocialLinks = async () => {
     setSaving(true);
@@ -265,44 +280,23 @@ const Admin = () => {
     }
   };
 
-  // PIN Authentication Screen
-  if (!isAuthenticated) {
+  // Loading state
+  if (authState === "loading") {
+    return (
+      <div className="min-h-screen bg-card flex items-center justify-center p-4">
+        <Loader2 className="animate-spin text-primary" size={40} />
+      </div>
+    );
+  }
+
+  // TOTP Setup Screen
+  if (authState === "setup") {
     return (
       <div className="min-h-screen bg-card flex items-center justify-center p-4">
         <div className="bg-background rounded-xl p-8 border border-border shadow-lg max-w-sm w-full">
-          <div className="text-center mb-6">
-            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <User className="text-primary" size={32} />
-            </div>
-            <h1 className="text-2xl font-bold text-primary mb-2">Admin Panel</h1>
-            <p className="text-muted-foreground text-sm">أدخل رمز الدخول</p>
-          </div>
-          
-          <form onSubmit={handlePinSubmit} className="space-y-4">
-            <div>
-              <input
-                type="password"
-                value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
-                placeholder="رمز الدخول"
-                className={`w-full px-4 py-3 rounded-lg border text-center text-xl tracking-widest
-                          bg-background focus:outline-none focus:ring-2 focus:ring-primary/50
-                          ${pinError ? "border-destructive" : "border-border"}`}
-                autoFocus
-              />
-              {pinError && (
-                <p className="text-destructive text-sm mt-2 text-center">رمز خاطئ، حاول مرة أخرى</p>
-              )}
-            </div>
-            <button
-              type="submit"
-              className="w-full bg-cta text-cta-foreground py-3 rounded-lg font-semibold 
-                       hover:brightness-105 transition-all"
-            >
-              دخول
-            </button>
-          </form>
-          
+          <TOTPSetup 
+            onComplete={() => setAuthState("authenticated")} 
+          />
           <button
             onClick={() => navigate("/")}
             className="w-full mt-4 text-muted-foreground hover:text-foreground transition-colors text-sm"
@@ -311,6 +305,17 @@ const Admin = () => {
           </button>
         </div>
       </div>
+    );
+  }
+
+  // TOTP Login Screen
+  if (authState === "login") {
+    return (
+      <TOTPLogin
+        secret={totpSecret}
+        onSuccess={() => setAuthState("authenticated")}
+        onBack={() => navigate("/")}
+      />
     );
   }
 
