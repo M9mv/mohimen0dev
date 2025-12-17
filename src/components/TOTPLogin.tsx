@@ -4,12 +4,11 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
 interface TOTPLoginProps {
-  secret: string;
   onSuccess: (code: string) => void;
   onBack: () => void;
 }
 
-const TOTPLogin = ({ secret, onSuccess, onBack }: TOTPLoginProps) => {
+const TOTPLogin = ({ onSuccess, onBack }: TOTPLoginProps) => {
   const { toast } = useToast();
   const [code, setCode] = useState("");
   const [verifying, setVerifying] = useState(false);
@@ -23,8 +22,9 @@ const TOTPLogin = ({ secret, onSuccess, onBack }: TOTPLoginProps) => {
     setError(false);
 
     try {
+      // Server-side verification - no secret needed client-side
       const { data, error: fnError } = await supabase.functions.invoke("totp-verify", {
-        body: { action: "verify", code, secret },
+        body: { action: "verify", code },
       });
 
       if (fnError) throw fnError;

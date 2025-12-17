@@ -35,7 +35,6 @@ const Admin = () => {
   const { settings, refetch: refetchSettings } = useSiteSettings();
   
   const [authState, setAuthState] = useState<"loading" | "setup" | "login" | "authenticated">("loading");
-  const [totpSecret, setTotpSecret] = useState("");
   const [currentTotpCode, setCurrentTotpCode] = useState("");
   const [codeExpired, setCodeExpired] = useState(false);
   
@@ -123,20 +122,17 @@ const Admin = () => {
     }
   };
 
-  // Check for existing TOTP secret on mount
+  // Check for existing TOTP secret on mount using edge function
   useEffect(() => {
     const checkTOTPSecret = async () => {
       try {
-        const { data, error } = await supabase
-          .from("site_settings")
-          .select("value")
-          .eq("key", "totp_secret")
-          .maybeSingle();
+        const { data, error } = await supabase.functions.invoke("totp-verify", {
+          body: { action: "check" },
+        });
 
         if (error) throw error;
 
-        if (data?.value) {
-          setTotpSecret(data.value);
+        if (data?.configured) {
           setAuthState("login");
         } else {
           setAuthState("setup");
@@ -273,36 +269,70 @@ const Admin = () => {
     }
   };
 
+  // Secure image upload via edge function with TOTP auth
+  const secureImageUpload = async (file: File, path: string): Promise<string | null> => {
+    if (!currentTotpCode) {
+      setCodeExpired(true);
+      toast({
+        title: "انتهت صلاحية الرمز",
+        description: "أدخل رمز TOTP جديد للمتابعة",
+        variant: "destructive",
+      });
+      return null;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("path", path);
+    formData.append("totpCode", currentTotpCode);
+
+    const { data, error } = await supabase.functions.invoke("upload-image", {
+      body: formData,
+    });
+
+    if (error) throw error;
+
+    if (data?.error === "Invalid authentication code") {
+      setCodeExpired(true);
+      toast({
+        title: "انتهت صلاحية الرمز",
+        description: "أدخل رمز TOTP جديد للمتابعة",
+        variant: "destructive",
+      });
+      return null;
+    }
+
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+
+    return data?.publicUrl || null;
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploading(true);
     try {
-      const fileExt = file.name.split(".").pop();
+      const fileExt = file.name.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${Date.now()}.${fileExt}`;
       const filePath = `projects/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from("site-images")
-        .upload(filePath, file);
-
-      if (uploadError) throw uploadError;
-
-      const { data } = supabase.storage
-        .from("site-images")
-        .getPublicUrl(filePath);
-
-      setFormData({ ...formData, image_url: data.publicUrl });
-      toast({
-        title: "تم الرفع",
-        description: "تم رفع الصورة بنجاح",
-      });
+      const publicUrl = await secureImageUpload(file, filePath);
+      
+      if (publicUrl) {
+        setFormData({ ...formData, image_url: publicUrl });
+        toast({
+          title: "تم الرفع",
+          description: "تم رفع الصورة بنجاح",
+        });
+      }
     } catch (error) {
       console.error("Upload error:", error);
       toast({
         title: "خطأ",
-        description: "فشل في رفع الصورة",
+        description: error instanceof Error ? error.message : "فشل في رفع الصورة",
         variant: "destructive",
       });
     } finally {
@@ -316,30 +346,24 @@ const Admin = () => {
 
     setUploading(true);
     try {
-      const fileExt = file.name.split(".").pop();
+      const fileExt = file.name.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `og-image.${fileExt}`;
       const filePath = `settings/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from("site-images")
-        .upload(filePath, file, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      const { data } = supabase.storage
-        .from("site-images")
-        .getPublicUrl(filePath);
-
-      setOgImage(data.publicUrl);
-      toast({
-        title: "تم الرفع",
-        description: "تم رفع صورة OG بنجاح",
-      });
+      const publicUrl = await secureImageUpload(file, filePath);
+      
+      if (publicUrl) {
+        setOgImage(publicUrl);
+        toast({
+          title: "تم الرفع",
+          description: "تم رفع صورة OG بنجاح",
+        });
+      }
     } catch (error) {
       console.error("Upload error:", error);
       toast({
         title: "خطأ",
-        description: "فشل في رفع الصورة",
+        description: error instanceof Error ? error.message : "فشل في رفع الصورة",
         variant: "destructive",
       });
     } finally {
@@ -379,7 +403,6 @@ const Admin = () => {
   if (authState === "login") {
     return (
       <TOTPLogin
-        secret={totpSecret}
         onSuccess={(code) => {
           setCurrentTotpCode(code);
           setCodeExpired(false);
@@ -402,7 +425,7 @@ const Admin = () => {
       setVerifying(true);
       try {
         const { data } = await supabase.functions.invoke("totp-verify", {
-          body: { action: "verify", code: reAuthCode, secret: totpSecret },
+          body: { action: "verify", code: reAuthCode },
         });
 
         if (data?.valid) {

@@ -118,6 +118,30 @@ serve(async (req) => {
   try {
     const { action, code, secret } = await req.json();
 
+    if (action === "check") {
+      // Check if TOTP is already configured (without revealing the secret)
+      const { data, error } = await supabaseAdmin
+        .from("site_settings")
+        .select("id")
+        .eq("key", "totp_secret")
+        .maybeSingle();
+      
+      if (error) {
+        console.error("Error checking TOTP:", error);
+        return new Response(
+          JSON.stringify({ configured: false }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      const configured = !!data;
+      console.log(`TOTP configured: ${configured}`);
+      return new Response(
+        JSON.stringify({ configured }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     if (action === "generate") {
       // Generate a new secret
       const newSecret = generateSecret();
@@ -172,15 +196,34 @@ serve(async (req) => {
         );
       }
 
-      if (!secret || !code) {
+      if (!code) {
         return new Response(
-          JSON.stringify({ valid: false, error: "Missing secret or code" }),
+          JSON.stringify({ valid: false, error: "Missing code" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
         );
       }
 
+      // Get secret from database if not provided (for login flow)
+      let totpSecret = secret;
+      if (!totpSecret) {
+        const { data: secretData, error: secretError } = await supabaseAdmin
+          .from("site_settings")
+          .select("value")
+          .eq("key", "totp_secret")
+          .maybeSingle();
+        
+        if (secretError || !secretData?.value) {
+          console.error("TOTP secret not found in database");
+          return new Response(
+            JSON.stringify({ valid: false, error: "TOTP not configured" }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+        totpSecret = secretData.value;
+      }
+
       // Generate current and previous TOTP codes for clock drift tolerance
-      const currentCode = await generateTOTP(secret);
+      const currentCode = await generateTOTP(totpSecret);
       
       // Calculate previous window code
       const time = Math.floor(Date.now() / 1000 / 30) - 1;
@@ -190,7 +233,7 @@ serve(async (req) => {
         timeBuffer[i] = t & 0xff;
         t = Math.floor(t / 256);
       }
-      const key = base32Decode(secret);
+      const key = base32Decode(totpSecret);
       const hmac = await hmacSha1(key, timeBuffer);
       const offset = hmac[hmac.length - 1] & 0x0f;
       const prevCodeNum =
