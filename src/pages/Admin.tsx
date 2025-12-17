@@ -1,10 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useDBProjects, DBProject } from "@/hooks/useProjects";
 import { useSocialLinks } from "@/hooks/useSocialLinks";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { categories } from "@/data/projects";
-import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send, Image, Loader2, Shield } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send, Image, Loader2, Shield, Key } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import TOTPSetup from "@/components/TOTPSetup";
@@ -18,15 +17,30 @@ interface ProjectFormData {
   link: string;
 }
 
+interface DBProject {
+  id: string;
+  title: string;
+  description: string | null;
+  image_url: string | null;
+  category: string | null;
+  link: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 const Admin = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { projects, loading: projectsLoading, addProject, updateProject, deleteProject } = useDBProjects();
-  const { socialLinks, loading: socialLoading, updateSocialLinks } = useSocialLinks();
-  const { settings, updateSetting } = useSiteSettings();
+  const { socialLinks, loading: socialLoading, refetch: refetchSocialLinks } = useSocialLinks();
+  const { settings, refetch: refetchSettings } = useSiteSettings();
   
   const [authState, setAuthState] = useState<"loading" | "setup" | "login" | "authenticated">("loading");
   const [totpSecret, setTotpSecret] = useState("");
+  const [currentTotpCode, setCurrentTotpCode] = useState("");
+  const [codeExpired, setCodeExpired] = useState(false);
+  
+  const [projects, setProjects] = useState<DBProject[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   
   const [editingProject, setEditingProject] = useState<DBProject | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -48,6 +62,66 @@ const Admin = () => {
   });
 
   const [ogImage, setOgImage] = useState("");
+
+  // Fetch projects from DB (read-only, no RLS issue for SELECT)
+  const fetchProjects = useCallback(async () => {
+    setProjectsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("*")
+        .order("created_at", { ascending: false });
+      
+      if (error) throw error;
+      setProjects(data || []);
+    } catch (error) {
+      console.error("Error fetching projects:", error);
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, []);
+
+  // Admin operation wrapper - requires TOTP code
+  const adminOperation = async (action: string, data: Record<string, unknown>) => {
+    if (!currentTotpCode) {
+      setCodeExpired(true);
+      toast({
+        title: "انتهت صلاحية الرمز",
+        description: "أدخل رمز TOTP جديد للمتابعة",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    try {
+      const { data: result, error } = await supabase.functions.invoke("admin-operations", {
+        body: { action, totpCode: currentTotpCode, data },
+      });
+
+      if (error) throw error;
+
+      if (result?.error === "Invalid authentication code") {
+        setCodeExpired(true);
+        toast({
+          title: "انتهت صلاحية الرمز",
+          description: "أدخل رمز TOTP جديد للمتابعة",
+          variant: "destructive",
+        });
+        return false;
+      }
+
+      return result?.success;
+    } catch (error) {
+      console.error("Admin operation error:", error);
+      setCodeExpired(true);
+      toast({
+        title: "خطأ",
+        description: "فشلت العملية، قد تحتاج لإدخال رمز جديد",
+        variant: "destructive",
+      });
+      return false;
+    }
+  };
 
   // Check for existing TOTP secret on mount
   useEffect(() => {
@@ -76,6 +150,13 @@ const Admin = () => {
     checkTOTPSecret();
   }, []);
 
+  // Fetch projects when authenticated
+  useEffect(() => {
+    if (authState === "authenticated") {
+      fetchProjects();
+    }
+  }, [authState, fetchProjects]);
+
   useEffect(() => {
     if (!socialLoading) {
       setLocalSocialLinks(socialLinks);
@@ -88,24 +169,22 @@ const Admin = () => {
 
   const handleSaveSocialLinks = async () => {
     setSaving(true);
-    try {
-      await updateSocialLinks(localSocialLinks);
-    } catch (error) {
-      // Error handled in hook
-    } finally {
-      setSaving(false);
+    const success = await adminOperation("update_social_links", localSocialLinks);
+    if (success) {
+      toast({ title: "تم الحفظ", description: "تم حفظ روابط التواصل" });
+      refetchSocialLinks();
     }
+    setSaving(false);
   };
 
   const handleSaveOgImage = async () => {
     setSaving(true);
-    try {
-      await updateSetting("og_image", ogImage);
-    } catch (error) {
-      // Error handled in hook
-    } finally {
-      setSaving(false);
+    const success = await adminOperation("update_setting", { key: "og_image", value: ogImage });
+    if (success) {
+      toast({ title: "تم الحفظ", description: "تم حفظ صورة OG" });
+      refetchSettings();
     }
+    setSaving(false);
   };
 
   const resetForm = () => {
@@ -150,58 +229,46 @@ const Admin = () => {
     }
 
     setSaving(true);
-    try {
-      if (editingProject) {
-        await updateProject(editingProject.id, {
-          title: formData.title,
-          description: formData.description,
-          image_url: formData.image_url,
-          category: formData.category,
-          link: formData.link || null,
-        });
-        toast({
-          title: "تم التحديث",
-          description: "تم تحديث المشروع بنجاح",
-        });
-      } else {
-        await addProject({
-          title: formData.title,
-          description: formData.description,
-          image_url: formData.image_url,
-          category: formData.category,
-          link: formData.link || null,
-        });
-        toast({
-          title: "تم الإنشاء",
-          description: "تم إضافة المشروع الجديد",
-        });
-      }
-      resetForm();
-    } catch (error) {
-      toast({
-        title: "خطأ",
-        description: "فشل في حفظ المشروع",
-        variant: "destructive",
+    let success = false;
+    
+    if (editingProject) {
+      success = await adminOperation("update_project", {
+        id: editingProject.id,
+        title: formData.title,
+        description: formData.description,
+        image_url: formData.image_url,
+        category: formData.category,
+        link: formData.link || null,
       });
-    } finally {
-      setSaving(false);
+      if (success) {
+        toast({ title: "تم التحديث", description: "تم تحديث المشروع بنجاح" });
+      }
+    } else {
+      success = await adminOperation("add_project", {
+        title: formData.title,
+        description: formData.description,
+        image_url: formData.image_url,
+        category: formData.category,
+        link: formData.link || null,
+      });
+      if (success) {
+        toast({ title: "تم الإنشاء", description: "تم إضافة المشروع الجديد" });
+      }
     }
+
+    if (success) {
+      resetForm();
+      fetchProjects();
+    }
+    setSaving(false);
   };
 
   const handleDelete = async (id: string) => {
     if (confirm("هل أنت متأكد من حذف هذا المشروع؟")) {
-      try {
-        await deleteProject(id);
-        toast({
-          title: "تم الحذف",
-          description: "تم حذف المشروع",
-        });
-      } catch (error) {
-        toast({
-          title: "خطأ",
-          description: "فشل في حذف المشروع",
-          variant: "destructive",
-        });
+      const success = await adminOperation("delete_project", { id });
+      if (success) {
+        toast({ title: "تم الحذف", description: "تم حذف المشروع" });
+        fetchProjects();
       }
     }
   };
@@ -313,14 +380,93 @@ const Admin = () => {
     return (
       <TOTPLogin
         secret={totpSecret}
-        onSuccess={() => setAuthState("authenticated")}
+        onSuccess={(code) => {
+          setCurrentTotpCode(code);
+          setCodeExpired(false);
+          setAuthState("authenticated");
+        }}
         onBack={() => navigate("/")}
       />
     );
   }
 
+  // Re-authentication modal when code expires
+  const ReAuthPrompt = () => {
+    const [reAuthCode, setReAuthCode] = useState("");
+    const [verifying, setVerifying] = useState(false);
+
+    const handleReAuth = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (reAuthCode.length !== 6) return;
+
+      setVerifying(true);
+      try {
+        const { data } = await supabase.functions.invoke("totp-verify", {
+          body: { action: "verify", code: reAuthCode, secret: totpSecret },
+        });
+
+        if (data?.valid) {
+          setCurrentTotpCode(reAuthCode);
+          setCodeExpired(false);
+          toast({ title: "تم التحقق", description: "يمكنك المتابعة الآن" });
+        } else {
+          toast({
+            title: data?.rateLimited ? "محاولات كثيرة" : "رمز خاطئ",
+            description: data?.rateLimited ? "انتظر 5 دقائق" : "حاول مرة أخرى",
+            variant: "destructive",
+          });
+          setReAuthCode("");
+        }
+      } catch (error) {
+        console.error("Re-auth error:", error);
+      } finally {
+        setVerifying(false);
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-background rounded-xl p-6 border border-border shadow-lg max-w-sm w-full">
+          <div className="text-center mb-4">
+            <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-3">
+              <Key className="text-amber-500" size={24} />
+            </div>
+            <h3 className="font-bold text-foreground">انتهت صلاحية الرمز</h3>
+            <p className="text-sm text-muted-foreground">أدخل رمز TOTP جديد للمتابعة</p>
+          </div>
+          <form onSubmit={handleReAuth}>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              value={reAuthCode}
+              onChange={(e) => setReAuthCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="000000"
+              className="w-full px-4 py-3 rounded-lg border border-border bg-background
+                       text-center text-2xl tracking-[0.5em] font-mono mb-4
+                       focus:outline-none focus:ring-2 focus:ring-primary/50"
+              autoFocus
+            />
+            <button
+              type="submit"
+              disabled={reAuthCode.length !== 6 || verifying}
+              className="w-full bg-cta text-cta-foreground py-2 rounded-lg font-semibold 
+                       hover:brightness-105 transition-all disabled:opacity-50
+                       flex items-center justify-center gap-2"
+            >
+              {verifying ? <Loader2 size={18} className="animate-spin" /> : null}
+              تأكيد
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-card">
+      {codeExpired && <ReAuthPrompt />}
       {/* Header */}
       <header className="bg-card border-b border-border sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">

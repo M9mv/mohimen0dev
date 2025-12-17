@@ -63,12 +63,12 @@ const TOTPSetup = ({ onComplete }: TOTPSetupProps) => {
       if (error) throw error;
 
       if (data.valid) {
-        // Save the secret to site_settings
-        const { error: saveError } = await supabase
-          .from("site_settings")
-          .upsert({ key: "totp_secret", value: secret }, { onConflict: "key" });
+        // Save the secret securely via edge function (bypasses RLS)
+        const { data: setupData, error: setupError } = await supabase.functions.invoke("totp-verify", {
+          body: { action: "setup", secret },
+        });
 
-        if (saveError) throw saveError;
+        if (setupError || !setupData?.success) throw setupError || new Error("Failed to save secret");
 
         toast({
           title: "تم الإعداد",
@@ -78,7 +78,7 @@ const TOTPSetup = ({ onComplete }: TOTPSetupProps) => {
       } else {
         toast({
           title: "رمز خاطئ",
-          description: "الرمز غير صحيح، حاول مرة أخرى",
+          description: data.rateLimited ? "محاولات كثيرة، انتظر 5 دقائق" : "الرمز غير صحيح، حاول مرة أخرى",
           variant: "destructive",
         });
         setVerifyCode("");
