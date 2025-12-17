@@ -12,6 +12,39 @@ const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
 );
 
+// Input validation functions
+function isValidUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeText(text: string | null | undefined, maxLength: number): string {
+  if (!text) return "";
+  return text.trim().slice(0, maxLength);
+}
+
+function isValidCategory(category: string | null | undefined): boolean {
+  if (!category) return true; // default will be applied
+  return ["web", "bot", "ai", "mobile", "other"].includes(category);
+}
+
+function isValidUsername(username: string | null | undefined): boolean {
+  if (!username) return false;
+  // Allow alphanumeric, underscores, and dots (common for social media)
+  return /^[a-zA-Z0-9_.]{1,100}$/.test(username);
+}
+
+function isValidSettingKey(key: string | null | undefined): boolean {
+  if (!key) return false;
+  // Whitelist allowed setting keys
+  return ["og_image", "totp_secret"].includes(key);
+}
+
 // TOTP verification functions
 function base32Decode(encoded: string): Uint8Array {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -124,7 +157,58 @@ serve(async (req) => {
     switch (action) {
       // Projects operations
       case "add_project": {
-        const { error } = await supabaseAdmin.from("projects").insert(data);
+        const { title, description, image_url, category, link } = data;
+
+        // Validate title
+        if (!title || typeof title !== "string" || title.trim().length === 0 || title.length > 200) {
+          return new Response(
+            JSON.stringify({ error: "Invalid title. Must be 1-200 characters." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate description (optional but if present, check length)
+        if (description && (typeof description !== "string" || description.length > 1000)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid description. Must be under 1000 characters." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate image_url (optional)
+        if (image_url && !isValidUrl(image_url)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid image URL. Must be a valid http/https URL." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate category
+        if (!isValidCategory(category)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid category. Must be: web, bot, ai, mobile, or other." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate link (optional)
+        if (link && !isValidUrl(link)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid link URL. Must be a valid http/https URL." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Sanitize and insert
+        const sanitizedData = {
+          title: sanitizeText(title, 200),
+          description: sanitizeText(description, 1000) || null,
+          image_url: image_url || null,
+          category: category || "web",
+          link: link || null,
+        };
+
+        const { error } = await supabaseAdmin.from("projects").insert(sanitizedData);
         if (error) throw error;
         return new Response(
           JSON.stringify({ success: true }),
@@ -133,7 +217,64 @@ serve(async (req) => {
       }
 
       case "update_project": {
-        const { id, ...updates } = data;
+        const { id, title, description, image_url, category, link } = data;
+
+        // Validate ID
+        if (!id || typeof id !== "string") {
+          return new Response(
+            JSON.stringify({ error: "Invalid project ID." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate title if present
+        if (title !== undefined && (typeof title !== "string" || title.trim().length === 0 || title.length > 200)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid title. Must be 1-200 characters." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate description if present
+        if (description !== undefined && description !== null && (typeof description !== "string" || description.length > 1000)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid description. Must be under 1000 characters." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate image_url if present
+        if (image_url !== undefined && image_url !== null && !isValidUrl(image_url)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid image URL. Must be a valid http/https URL." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate category if present
+        if (category !== undefined && !isValidCategory(category)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid category. Must be: web, bot, ai, mobile, or other." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate link if present
+        if (link !== undefined && link !== null && !isValidUrl(link)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid link URL. Must be a valid http/https URL." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Build update object with only provided fields
+        const updates: Record<string, string | null> = {};
+        if (title !== undefined) updates.title = sanitizeText(title, 200);
+        if (description !== undefined) updates.description = description ? sanitizeText(description, 1000) : null;
+        if (image_url !== undefined) updates.image_url = image_url || null;
+        if (category !== undefined) updates.category = category || "web";
+        if (link !== undefined) updates.link = link || null;
+
         const { error } = await supabaseAdmin.from("projects").update(updates).eq("id", id);
         if (error) throw error;
         return new Response(
@@ -143,6 +284,14 @@ serve(async (req) => {
       }
 
       case "delete_project": {
+        // Validate ID
+        if (!data.id || typeof data.id !== "string") {
+          return new Response(
+            JSON.stringify({ error: "Invalid project ID." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
         const { error } = await supabaseAdmin.from("projects").delete().eq("id", data.id);
         if (error) throw error;
         return new Response(
@@ -154,16 +303,35 @@ serve(async (req) => {
       // Social links operations
       case "update_social_links": {
         const { instagram, telegram } = data;
+
+        // Validate usernames
+        if (instagram !== undefined && !isValidUsername(instagram)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid Instagram username. Use only letters, numbers, underscores, and dots (1-100 chars)." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        if (telegram !== undefined && !isValidUsername(telegram)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid Telegram username. Use only letters, numbers, underscores, and dots (1-100 chars)." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
         
         // Update Instagram
-        await supabaseAdmin
-          .from("social_links")
-          .upsert({ platform: "instagram", username: instagram }, { onConflict: "platform" });
+        if (instagram !== undefined) {
+          await supabaseAdmin
+            .from("social_links")
+            .upsert({ platform: "instagram", username: sanitizeText(instagram, 100) }, { onConflict: "platform" });
+        }
         
         // Update Telegram
-        await supabaseAdmin
-          .from("social_links")
-          .upsert({ platform: "telegram", username: telegram }, { onConflict: "platform" });
+        if (telegram !== undefined) {
+          await supabaseAdmin
+            .from("social_links")
+            .upsert({ platform: "telegram", username: sanitizeText(telegram, 100) }, { onConflict: "platform" });
+        }
         
         return new Response(
           JSON.stringify({ success: true }),
@@ -174,9 +342,34 @@ serve(async (req) => {
       // Site settings operations
       case "update_setting": {
         const { key, value } = data;
+
+        // Validate key
+        if (!isValidSettingKey(key)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid setting key. Allowed: og_image, totp_secret." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate value based on key
+        if (key === "og_image" && value && !isValidUrl(value)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid OG image URL. Must be a valid http/https URL." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate value length
+        if (value && (typeof value !== "string" || value.length > 1000)) {
+          return new Response(
+            JSON.stringify({ error: "Value too long. Maximum 1000 characters." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
         const { error } = await supabaseAdmin
           .from("site_settings")
-          .upsert({ key, value }, { onConflict: "key" });
+          .upsert({ key, value: value || null }, { onConflict: "key" });
         if (error) throw error;
         return new Response(
           JSON.stringify({ success: true }),

@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.admin-operations]
 verify_jwt = false
+
+[functions.upload-image]
+verify_jwt = false
