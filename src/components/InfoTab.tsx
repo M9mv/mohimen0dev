@@ -1,4 +1,4 @@
-import { Instagram, Send } from "lucide-react";
+import { Instagram, Send, Mail } from "lucide-react";
 import profileAvatar from "@/assets/profile-avatar.jpg";
 
 interface InfoTabProps {
@@ -41,6 +41,13 @@ const InfoTab = ({ socialLinks }: InfoTabProps) => {
           </h3>
 
           <div className="flex justify-center gap-6 animate-slide-up animation-delay-400">
+            {/* Email */}
+            <a
+              href="mailto:mohimen@programmer.net"
+              className="w-14 h-14 rounded-full glass-card flex items-center justify-center hover:shadow-lg hover:scale-110 transition-all duration-200 group"
+            >
+              <Mail size={28} className="text-foreground group-hover:text-primary transition-colors" />
+            </a>
             {socialLinks.instagram && (
               <a
                 href={`https://instagram.com/${socialLinks.instagram.replace('@', '')}`}
