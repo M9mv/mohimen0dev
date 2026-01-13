@@ -28,11 +28,6 @@ function sanitizeText(text: string | null | undefined, maxLength: number): strin
   return text.trim().slice(0, maxLength);
 }
 
-function isValidCategory(category: string | null | undefined): boolean {
-  if (!category) return true; // default will be applied
-  return ["web", "bot", "ai", "mobile", "other"].includes(category);
-}
-
 function isValidUsername(username: string | null | undefined): boolean {
   if (!username) return false;
   // Allow alphanumeric, underscores, and dots (common for social media)
@@ -45,77 +40,30 @@ function isValidSettingKey(key: string | null | undefined): boolean {
   return ["og_image", "totp_secret"].includes(key);
 }
 
-// TOTP verification functions
-function base32Decode(encoded: string): Uint8Array {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  let bits = "";
-  for (const char of encoded.toUpperCase().replace(/=+$/, "")) {
-    const val = alphabet.indexOf(char);
-    if (val === -1) continue;
-    bits += val.toString(2).padStart(5, "0");
-  }
-  const bytes = new Uint8Array(Math.floor(bits.length / 8));
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(bits.slice(i * 8, (i + 1) * 8), 2);
-  }
-  return bytes;
+// Validate session token
+async function validateSession(sessionToken: string): Promise<boolean> {
+  if (!sessionToken) return false;
+  
+  const { data, error } = await supabaseAdmin
+    .from("admin_sessions")
+    .select("expires_at")
+    .eq("session_token", sessionToken)
+    .maybeSingle();
+  
+  if (error || !data) return false;
+  
+  const expiresAt = new Date(data.expires_at);
+  return expiresAt > new Date();
 }
 
-async function hmacSha1(key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    key.buffer as ArrayBuffer,
-    { name: "HMAC", hash: "SHA-1" },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, data.buffer as ArrayBuffer);
-  return new Uint8Array(signature);
-}
-
-async function generateTOTP(secret: string): Promise<string> {
-  const key = base32Decode(secret);
-  const time = Math.floor(Date.now() / 1000 / 30);
-  const timeBuffer = new Uint8Array(8);
-  let t = time;
-  for (let i = 7; i >= 0; i--) {
-    timeBuffer[i] = t & 0xff;
-    t = Math.floor(t / 256);
-  }
+// Extend session expiry (30 minutes)
+async function extendSession(sessionToken: string): Promise<void> {
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   
-  const hmac = await hmacSha1(key, timeBuffer);
-  const offset = hmac[hmac.length - 1] & 0x0f;
-  const code =
-    ((hmac[offset] & 0x7f) << 24) |
-    ((hmac[offset + 1] & 0xff) << 16) |
-    ((hmac[offset + 2] & 0xff) << 8) |
-    (hmac[offset + 3] & 0xff);
-  
-  return (code % 1000000).toString().padStart(6, "0");
-}
-
-async function verifyTOTP(code: string, secret: string): Promise<boolean> {
-  const currentCode = await generateTOTP(secret);
-  
-  // Also check previous window for clock drift tolerance
-  const time = Math.floor(Date.now() / 1000 / 30) - 1;
-  const timeBuffer = new Uint8Array(8);
-  let t = time;
-  for (let i = 7; i >= 0; i--) {
-    timeBuffer[i] = t & 0xff;
-    t = Math.floor(t / 256);
-  }
-  const key = base32Decode(secret);
-  const hmac = await hmacSha1(key, timeBuffer);
-  const offset = hmac[hmac.length - 1] & 0x0f;
-  const prevCodeNum =
-    ((hmac[offset] & 0x7f) << 24) |
-    ((hmac[offset + 1] & 0xff) << 16) |
-    ((hmac[offset + 2] & 0xff) << 8) |
-    (hmac[offset + 3] & 0xff);
-  const prevCode = (prevCodeNum % 1000000).toString().padStart(6, "0");
-  
-  return code === currentCode || code === prevCode;
+  await supabaseAdmin
+    .from("admin_sessions")
+    .update({ expires_at: expiresAt })
+    .eq("session_token", sessionToken);
 }
 
 serve(async (req) => {
@@ -124,32 +72,20 @@ serve(async (req) => {
   }
 
   try {
-    const { action, totpCode, data } = await req.json();
+    const { action, sessionToken, data } = await req.json();
 
-    // Get TOTP secret from database
-    const { data: secretData, error: secretError } = await supabaseAdmin
-      .from("site_settings")
-      .select("value")
-      .eq("key", "totp_secret")
-      .maybeSingle();
-
-    if (secretError || !secretData?.value) {
-      console.error("TOTP secret not found");
+    // Validate session token instead of TOTP code for every operation
+    const isValidSession = await validateSession(sessionToken);
+    if (!isValidSession) {
+      console.log("Invalid or expired session");
       return new Response(
-        JSON.stringify({ error: "Authentication not configured" }),
+        JSON.stringify({ error: "Session expired", sessionExpired: true }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401 }
       );
     }
 
-    // Verify TOTP code
-    const isValid = await verifyTOTP(totpCode, secretData.value);
-    if (!isValid) {
-      console.log("Invalid TOTP code for admin operation");
-      return new Response(
-        JSON.stringify({ error: "Invalid authentication code" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401 }
-      );
-    }
+    // Extend session on each successful operation
+    await extendSession(sessionToken);
 
     console.log(`Admin operation: ${action}`);
 
@@ -183,14 +119,6 @@ serve(async (req) => {
           );
         }
 
-        // Validate category
-        if (!isValidCategory(category)) {
-          return new Response(
-            JSON.stringify({ error: "Invalid category. Must be: web, bot, ai, mobile, or other." }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-          );
-        }
-
         // Validate link (optional)
         if (link && !isValidUrl(link)) {
           return new Response(
@@ -204,14 +132,19 @@ serve(async (req) => {
           title: sanitizeText(title, 200),
           description: sanitizeText(description, 1000) || null,
           image_url: image_url || null,
-          category: category || "web",
+          category: sanitizeText(category, 100) || null,
           link: link || null,
         };
 
-        const { error } = await supabaseAdmin.from("projects").insert(sanitizedData);
+        const { data: insertedProject, error } = await supabaseAdmin
+          .from("projects")
+          .insert(sanitizedData)
+          .select()
+          .single();
+        
         if (error) throw error;
         return new Response(
-          JSON.stringify({ success: true }),
+          JSON.stringify({ success: true, project: insertedProject }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -251,14 +184,6 @@ serve(async (req) => {
           );
         }
 
-        // Validate category if present
-        if (category !== undefined && !isValidCategory(category)) {
-          return new Response(
-            JSON.stringify({ error: "Invalid category. Must be: web, bot, ai, mobile, or other." }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-          );
-        }
-
         // Validate link if present
         if (link !== undefined && link !== null && !isValidUrl(link)) {
           return new Response(
@@ -272,7 +197,7 @@ serve(async (req) => {
         if (title !== undefined) updates.title = sanitizeText(title, 200);
         if (description !== undefined) updates.description = description ? sanitizeText(description, 1000) : null;
         if (image_url !== undefined) updates.image_url = image_url || null;
-        if (category !== undefined) updates.category = category || "web";
+        if (category !== undefined) updates.category = sanitizeText(category, 100) || null;
         if (link !== undefined) updates.link = link || null;
 
         const { error } = await supabaseAdmin.from("projects").update(updates).eq("id", id);
@@ -300,19 +225,186 @@ serve(async (req) => {
         );
       }
 
+      // Project images operations
+      case "add_project_images": {
+        const { project_id, images } = data;
+
+        if (!project_id || !Array.isArray(images)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid project_id or images array." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Validate each image
+        for (const img of images) {
+          if (!isValidUrl(img.image_url)) {
+            return new Response(
+              JSON.stringify({ error: "Invalid image URL." }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+            );
+          }
+        }
+
+        // Insert images
+        const imagesToInsert = images.map((img: { image_url: string; is_primary?: boolean; display_order?: number }, index: number) => ({
+          project_id,
+          image_url: img.image_url,
+          is_primary: img.is_primary || false,
+          display_order: img.display_order ?? index,
+        }));
+
+        const { error } = await supabaseAdmin.from("project_images").insert(imagesToInsert);
+        if (error) throw error;
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "update_project_image": {
+        const { id, is_primary, display_order } = data;
+
+        if (!id) {
+          return new Response(
+            JSON.stringify({ error: "Invalid image ID." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        const updates: Record<string, boolean | number> = {};
+        if (is_primary !== undefined) updates.is_primary = is_primary;
+        if (display_order !== undefined) updates.display_order = display_order;
+
+        const { error } = await supabaseAdmin.from("project_images").update(updates).eq("id", id);
+        if (error) throw error;
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "delete_project_image": {
+        if (!data.id) {
+          return new Response(
+            JSON.stringify({ error: "Invalid image ID." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        const { error } = await supabaseAdmin.from("project_images").delete().eq("id", data.id);
+        if (error) throw error;
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "set_primary_image": {
+        const { project_id, image_id } = data;
+
+        if (!project_id || !image_id) {
+          return new Response(
+            JSON.stringify({ error: "Invalid project_id or image_id." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Remove primary from all images of this project
+        await supabaseAdmin
+          .from("project_images")
+          .update({ is_primary: false })
+          .eq("project_id", project_id);
+
+        // Set new primary
+        const { error } = await supabaseAdmin
+          .from("project_images")
+          .update({ is_primary: true })
+          .eq("id", image_id);
+
+        if (error) throw error;
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Categories operations
+      case "add_category": {
+        const { name } = data;
+
+        if (!name || typeof name !== "string" || name.trim().length === 0 || name.length > 100) {
+          return new Response(
+            JSON.stringify({ error: "Invalid category name. Must be 1-100 characters." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        const { data: insertedCategory, error } = await supabaseAdmin
+          .from("categories")
+          .insert({ name: sanitizeText(name, 100), is_default: false })
+          .select()
+          .single();
+
+        if (error) {
+          if (error.code === "23505") {
+            return new Response(
+              JSON.stringify({ error: "Category already exists." }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+            );
+          }
+          throw error;
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, category: insertedCategory }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "delete_category": {
+        if (!data.id) {
+          return new Response(
+            JSON.stringify({ error: "Invalid category ID." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Don't allow deleting default categories
+        const { data: category } = await supabaseAdmin
+          .from("categories")
+          .select("is_default")
+          .eq("id", data.id)
+          .single();
+
+        if (category?.is_default) {
+          return new Response(
+            JSON.stringify({ error: "Cannot delete default categories." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        const { error } = await supabaseAdmin.from("categories").delete().eq("id", data.id);
+        if (error) throw error;
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       // Social links operations
       case "update_social_links": {
         const { instagram, telegram } = data;
 
         // Validate usernames
-        if (instagram !== undefined && !isValidUsername(instagram)) {
+        if (instagram !== undefined && instagram !== "" && !isValidUsername(instagram)) {
           return new Response(
             JSON.stringify({ error: "Invalid Instagram username. Use only letters, numbers, underscores, and dots (1-100 chars)." }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
           );
         }
 
-        if (telegram !== undefined && !isValidUsername(telegram)) {
+        if (telegram !== undefined && telegram !== "" && !isValidUsername(telegram)) {
           return new Response(
             JSON.stringify({ error: "Invalid Telegram username. Use only letters, numbers, underscores, and dots (1-100 chars)." }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
@@ -323,14 +415,14 @@ serve(async (req) => {
         if (instagram !== undefined) {
           await supabaseAdmin
             .from("social_links")
-            .upsert({ platform: "instagram", username: sanitizeText(instagram, 100) }, { onConflict: "platform" });
+            .upsert({ platform: "instagram", username: sanitizeText(instagram, 100) || "" }, { onConflict: "platform" });
         }
         
         // Update Telegram
         if (telegram !== undefined) {
           await supabaseAdmin
             .from("social_links")
-            .upsert({ platform: "telegram", username: sanitizeText(telegram, 100) }, { onConflict: "platform" });
+            .upsert({ platform: "telegram", username: sanitizeText(telegram, 100) || "" }, { onConflict: "platform" });
         }
         
         return new Response(
