@@ -12,77 +12,30 @@ const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
 );
 
-// TOTP verification functions
-function base32Decode(encoded: string): Uint8Array {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  let bits = "";
-  for (const char of encoded.toUpperCase().replace(/=+$/, "")) {
-    const val = alphabet.indexOf(char);
-    if (val === -1) continue;
-    bits += val.toString(2).padStart(5, "0");
-  }
-  const bytes = new Uint8Array(Math.floor(bits.length / 8));
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(bits.slice(i * 8, (i + 1) * 8), 2);
-  }
-  return bytes;
+// Validate session token
+async function validateSession(sessionToken: string): Promise<boolean> {
+  if (!sessionToken) return false;
+  
+  const { data, error } = await supabaseAdmin
+    .from("admin_sessions")
+    .select("expires_at")
+    .eq("session_token", sessionToken)
+    .maybeSingle();
+  
+  if (error || !data) return false;
+  
+  const expiresAt = new Date(data.expires_at);
+  return expiresAt > new Date();
 }
 
-async function hmacSha1(key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    key.buffer as ArrayBuffer,
-    { name: "HMAC", hash: "SHA-1" },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, data.buffer as ArrayBuffer);
-  return new Uint8Array(signature);
-}
-
-async function generateTOTP(secret: string): Promise<string> {
-  const key = base32Decode(secret);
-  const time = Math.floor(Date.now() / 1000 / 30);
-  const timeBuffer = new Uint8Array(8);
-  let t = time;
-  for (let i = 7; i >= 0; i--) {
-    timeBuffer[i] = t & 0xff;
-    t = Math.floor(t / 256);
-  }
+// Extend session expiry (30 minutes)
+async function extendSession(sessionToken: string): Promise<void> {
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   
-  const hmac = await hmacSha1(key, timeBuffer);
-  const offset = hmac[hmac.length - 1] & 0x0f;
-  const code =
-    ((hmac[offset] & 0x7f) << 24) |
-    ((hmac[offset + 1] & 0xff) << 16) |
-    ((hmac[offset + 2] & 0xff) << 8) |
-    (hmac[offset + 3] & 0xff);
-  
-  return (code % 1000000).toString().padStart(6, "0");
-}
-
-async function verifyTOTP(code: string, secret: string): Promise<boolean> {
-  const currentCode = await generateTOTP(secret);
-  
-  // Also check previous window for clock drift tolerance
-  const time = Math.floor(Date.now() / 1000 / 30) - 1;
-  const timeBuffer = new Uint8Array(8);
-  let t = time;
-  for (let i = 7; i >= 0; i--) {
-    timeBuffer[i] = t & 0xff;
-    t = Math.floor(t / 256);
-  }
-  const key = base32Decode(secret);
-  const hmac = await hmacSha1(key, timeBuffer);
-  const offset = hmac[hmac.length - 1] & 0x0f;
-  const prevCodeNum =
-    ((hmac[offset] & 0x7f) << 24) |
-    ((hmac[offset + 1] & 0xff) << 16) |
-    ((hmac[offset + 2] & 0xff) << 8) |
-    (hmac[offset + 3] & 0xff);
-  const prevCode = (prevCodeNum % 1000000).toString().padStart(6, "0");
-  
-  return code === currentCode || code === prevCode;
+  await supabaseAdmin
+    .from("admin_sessions")
+    .update({ expires_at: expiresAt })
+    .eq("session_token", sessionToken);
 }
 
 // Validate image magic bytes
@@ -133,25 +86,29 @@ serve(async (req) => {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const path = formData.get("path") as string | null;
-    const totpCode = formData.get("totpCode") as string | null;
+    const sessionToken = formData.get("sessionToken") as string | null;
 
     // Validate required fields
-    if (!file || !path || !totpCode) {
+    if (!file || !path || !sessionToken) {
       console.error("Missing required fields");
       return new Response(
-        JSON.stringify({ error: "Missing required fields: file, path, totpCode" }),
+        JSON.stringify({ error: "Missing required fields: file, path, sessionToken" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
       );
     }
 
-    // Validate TOTP code format
-    if (!/^\d{6}$/.test(totpCode)) {
-      console.error("Invalid TOTP code format");
+    // Validate session
+    const isValidSession = await validateSession(sessionToken);
+    if (!isValidSession) {
+      console.log("Invalid or expired session for upload");
       return new Response(
-        JSON.stringify({ error: "Invalid TOTP code format" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        JSON.stringify({ error: "Session expired", sessionExpired: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401 }
       );
     }
+
+    // Extend session on successful auth
+    await extendSession(sessionToken);
 
     // Validate path
     if (!isValidPath(path)) {
@@ -168,31 +125,6 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: "File too large. Maximum size is 5MB" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-      );
-    }
-
-    // Get TOTP secret from database
-    const { data: secretData, error: secretError } = await supabaseAdmin
-      .from("site_settings")
-      .select("value")
-      .eq("key", "totp_secret")
-      .maybeSingle();
-
-    if (secretError || !secretData?.value) {
-      console.error("TOTP secret not found");
-      return new Response(
-        JSON.stringify({ error: "Authentication not configured" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401 }
-      );
-    }
-
-    // Verify TOTP code
-    const isValid = await verifyTOTP(totpCode, secretData.value);
-    if (!isValid) {
-      console.log("Invalid TOTP code for upload operation");
-      return new Response(
-        JSON.stringify({ error: "Invalid authentication code" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401 }
       );
     }
 

@@ -6,6 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Session duration: 30 minutes
+const SESSION_DURATION_MS = 30 * 60 * 1000;
+
 // Create Supabase admin client for rate limiting
 const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -72,6 +75,12 @@ function generateSecret(): string {
   return result;
 }
 
+function generateSessionToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // Rate limiting: Check failed attempts in last 5 minutes
 async function checkRateLimit(ipAddress: string): Promise<{ blocked: boolean; attemptsCount: number }> {
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -106,6 +115,76 @@ async function logAttempt(ipAddress: string, success: boolean) {
   }
 }
 
+// Get TOTP secret from the secure admin_secrets table (primary) or fallback to site_settings
+async function getTOTPSecret(): Promise<string | null> {
+  // Try admin_secrets first (more secure)
+  const { data: adminSecret } = await supabaseAdmin
+    .from("admin_secrets")
+    .select("value")
+    .eq("key", "totp_secret")
+    .maybeSingle();
+  
+  if (adminSecret?.value) {
+    return adminSecret.value;
+  }
+  
+  // Fallback to site_settings for backward compatibility
+  const { data: settingSecret } = await supabaseAdmin
+    .from("site_settings")
+    .select("value")
+    .eq("key", "totp_secret")
+    .maybeSingle();
+  
+  return settingSecret?.value || null;
+}
+
+// Validate session token
+async function validateSession(sessionToken: string): Promise<boolean> {
+  if (!sessionToken) return false;
+  
+  const { data, error } = await supabaseAdmin
+    .from("admin_sessions")
+    .select("expires_at")
+    .eq("session_token", sessionToken)
+    .maybeSingle();
+  
+  if (error || !data) return false;
+  
+  const expiresAt = new Date(data.expires_at);
+  return expiresAt > new Date();
+}
+
+// Create a new session
+async function createSession(): Promise<string> {
+  const sessionToken = generateSessionToken();
+  const expiresAt = new Date(Date.now() + SESSION_DURATION_MS).toISOString();
+  
+  // Clean up old expired sessions
+  await supabaseAdmin
+    .from("admin_sessions")
+    .delete()
+    .lt("expires_at", new Date().toISOString());
+  
+  // Create new session
+  await supabaseAdmin
+    .from("admin_sessions")
+    .insert({ session_token: sessionToken, expires_at: expiresAt });
+  
+  return sessionToken;
+}
+
+// Extend session expiry
+async function extendSession(sessionToken: string): Promise<boolean> {
+  const expiresAt = new Date(Date.now() + SESSION_DURATION_MS).toISOString();
+  
+  const { error } = await supabaseAdmin
+    .from("admin_sessions")
+    .update({ expires_at: expiresAt })
+    .eq("session_token", sessionToken);
+  
+  return !error;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -116,28 +195,27 @@ serve(async (req) => {
                     "unknown";
 
   try {
-    const { action, code, secret } = await req.json();
+    const { action, code, secret, sessionToken } = await req.json();
 
     if (action === "check") {
       // Check if TOTP is already configured (without revealing the secret)
-      const { data, error } = await supabaseAdmin
-        .from("site_settings")
-        .select("id")
-        .eq("key", "totp_secret")
-        .maybeSingle();
-      
-      if (error) {
-        console.error("Error checking TOTP:", error);
-        return new Response(
-          JSON.stringify({ configured: false }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      
-      const configured = !!data;
+      const totpSecret = await getTOTPSecret();
+      const configured = !!totpSecret;
       console.log(`TOTP configured: ${configured}`);
       return new Response(
         JSON.stringify({ configured }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "validate_session") {
+      // Validate and optionally extend session
+      const isValid = await validateSession(sessionToken);
+      if (isValid) {
+        await extendSession(sessionToken);
+      }
+      return new Response(
+        JSON.stringify({ valid: isValid }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -153,7 +231,7 @@ serve(async (req) => {
     }
 
     if (action === "setup") {
-      // Save TOTP secret using service role (bypasses RLS)
+      // Save TOTP secret to both tables (admin_secrets as primary, site_settings for backward compat)
       if (!secret) {
         return new Response(
           JSON.stringify({ error: "Missing secret" }),
@@ -161,21 +239,34 @@ serve(async (req) => {
         );
       }
 
-      const { error: saveError } = await supabaseAdmin
+      // Save to admin_secrets (secure table)
+      const { error: adminError } = await supabaseAdmin
+        .from("admin_secrets")
+        .upsert({ key: "totp_secret", value: secret }, { onConflict: "key" });
+
+      if (adminError) {
+        console.error("Error saving TOTP secret to admin_secrets:", adminError);
+      }
+
+      // Also save to site_settings for backward compatibility
+      const { error: settingsError } = await supabaseAdmin
         .from("site_settings")
         .upsert({ key: "totp_secret", value: secret }, { onConflict: "key" });
 
-      if (saveError) {
-        console.error("Error saving TOTP secret:", saveError);
+      if (settingsError) {
+        console.error("Error saving TOTP secret to site_settings:", settingsError);
         return new Response(
           JSON.stringify({ error: "Failed to save secret" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
         );
       }
 
+      // Create a session for the user
+      const newSessionToken = await createSession();
+
       console.log("TOTP secret saved successfully");
       return new Response(
-        JSON.stringify({ success: true }),
+        JSON.stringify({ success: true, sessionToken: newSessionToken }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -206,20 +297,15 @@ serve(async (req) => {
       // Get secret from database if not provided (for login flow)
       let totpSecret = secret;
       if (!totpSecret) {
-        const { data: secretData, error: secretError } = await supabaseAdmin
-          .from("site_settings")
-          .select("value")
-          .eq("key", "totp_secret")
-          .maybeSingle();
+        totpSecret = await getTOTPSecret();
         
-        if (secretError || !secretData?.value) {
+        if (!totpSecret) {
           console.error("TOTP secret not found in database");
           return new Response(
             JSON.stringify({ valid: false, error: "TOTP not configured" }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
           );
         }
-        totpSecret = secretData.value;
       }
 
       // Generate current and previous TOTP codes for clock drift tolerance
@@ -250,8 +336,17 @@ serve(async (req) => {
       
       console.log(`TOTP verification for IP ${ipAddress}: ${isValid ? "SUCCESS" : "FAILED"}`);
 
+      if (isValid) {
+        // Create a new session
+        const newSessionToken = await createSession();
+        return new Response(
+          JSON.stringify({ valid: true, sessionToken: newSessionToken }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       return new Response(
-        JSON.stringify({ valid: isValid }),
+        JSON.stringify({ valid: false }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
