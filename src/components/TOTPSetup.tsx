@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
 interface TOTPSetupProps {
-  onComplete: () => void;
+  onComplete: (sessionToken: string) => void;
 }
 
 const TOTPSetup = ({ onComplete }: TOTPSetupProps) => {
@@ -68,13 +68,13 @@ const TOTPSetup = ({ onComplete }: TOTPSetupProps) => {
           body: { action: "setup", secret },
         });
 
-        if (setupError || !setupData?.success) throw setupError || new Error("Failed to save secret");
+        if (setupError || !setupData?.success || !setupData?.sessionToken) throw setupError || new Error("Failed to save secret");
 
         toast({
           title: "تم الإعداد",
           description: "تم تفعيل المصادقة الثنائية بنجاح",
         });
-        onComplete();
+        onComplete(setupData.sessionToken);
       } else {
         toast({
           title: "رمز خاطئ",

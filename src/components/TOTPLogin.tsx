@@ -4,7 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
 interface TOTPLoginProps {
-  onSuccess: (code: string) => void;
+  onSuccess: (sessionToken: string) => void;
   onBack: () => void;
 }
 
@@ -29,8 +29,8 @@ const TOTPLogin = ({ onSuccess, onBack }: TOTPLoginProps) => {
 
       if (fnError) throw fnError;
 
-      if (data.valid) {
-        onSuccess(code);
+      if (data.valid && data.sessionToken) {
+        onSuccess(data.sessionToken);
       } else {
         setError(true);
         setCode("");
