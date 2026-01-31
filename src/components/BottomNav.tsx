@@ -1,13 +1,14 @@
-import { Home, FolderOpen, User } from "lucide-react";
+import { Home, FolderOpen, User, ShoppingBag } from "lucide-react";
 
 interface BottomNavProps {
-  activeTab: "home" | "projects" | "info";
-  onTabChange: (tab: "home" | "projects" | "info") => void;
+  activeTab: "home" | "projects" | "store" | "info";
+  onTabChange: (tab: "home" | "projects" | "store" | "info") => void;
 }
 
 const BottomNav = ({ activeTab, onTabChange }: BottomNavProps) => {
   const tabs = [
     { id: "info" as const, label: "معلومات", icon: User },
+    { id: "store" as const, label: "المتجر", icon: ShoppingBag },
     { id: "projects" as const, label: "المشاريع", icon: FolderOpen },
     { id: "home" as const, label: "الرئيسية", icon: Home },
   ];

@@ -3,10 +3,11 @@ import { useNavigate } from "react-router-dom";
 import BottomNav from "@/components/BottomNav";
 import HomeTab from "@/components/HomeTab";
 import ProjectsTab from "@/components/ProjectsTab";
+import StoreTab from "@/components/StoreTab";
 import InfoTab from "@/components/InfoTab";
 import { useSocialLinks } from "@/hooks/useSocialLinks";
 
-type TabType = "home" | "projects" | "info";
+type TabType = "home" | "projects" | "store" | "info";
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState<TabType>("home");
@@ -60,6 +61,7 @@ const Index = () => {
           <HomeTab onViewProjects={handleViewProjects} onTitleClick={handleTitleClick} />
         )}
         {activeTab === "projects" && <ProjectsTab onTitleClick={handleTitleClick} />}
+        {activeTab === "store" && <StoreTab />}
         {activeTab === "info" && <InfoTab socialLinks={socialLinks} />}
       </main>
 

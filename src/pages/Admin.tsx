@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSocialLinks } from "@/hooks/useSocialLinks";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
-import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send, Image, Loader2, Shield, Key, Star, StarOff } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Save, X, Upload, User, Instagram, Send, Image, Loader2, Shield, Key, Star, StarOff, ShoppingBag } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import TOTPSetup from "@/components/TOTPSetup";
 import TOTPLogin from "@/components/TOTPLogin";
+import StoreOrdersSection from "@/components/admin/StoreOrdersSection";
 
 interface ProjectFormData {
   title: string;
@@ -60,7 +61,7 @@ const Admin = () => {
   const [editingProject, setEditingProject] = useState<DBProject | null>(null);
   const [projectImages, setProjectImages] = useState<ProjectImage[]>([]);
   const [isCreating, setIsCreating] = useState(false);
-  const [activeSection, setActiveSection] = useState<"projects" | "profile" | "settings">("projects");
+  const [activeSection, setActiveSection] = useState<"projects" | "profile" | "settings" | "store">("projects");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   
@@ -773,6 +774,17 @@ const Admin = () => {
           >
             الإعدادات
           </button>
+          <button
+            onClick={() => setActiveSection("store")}
+            className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+              activeSection === "store"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-secondary-foreground hover:bg-accent"
+            }`}
+          >
+            <ShoppingBag size={18} />
+            المتجر
+          </button>
         </div>
 
         {/* Settings Section */}
@@ -1225,6 +1237,14 @@ const Admin = () => {
               </div>
             )}
           </div>
+        )}
+
+        {/* Store Section */}
+        {activeSection === "store" && sessionToken && (
+          <StoreOrdersSection
+            sessionToken={sessionToken}
+            onSessionExpired={() => setSessionExpired(true)}
+          />
         )}
       </div>
     </div>
