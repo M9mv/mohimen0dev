@@ -189,11 +189,11 @@ const StoreTab = () => {
                 className="w-full text-center"
               >
                 {/* Large Product Image */}
-                {product.image_url ? (
+{product.image_url ? (
                   <img
                     src={product.image_url}
                     alt={product.name}
-                    className="w-full h-48 object-cover"
+                    className="w-full"
                   />
                 ) : (
                   <div className="w-full h-48 bg-primary/10 flex items-center justify-center">
