@@ -37,7 +37,7 @@ function isValidUsername(username: string | null | undefined): boolean {
 function isValidSettingKey(key: string | null | undefined): boolean {
   if (!key) return false;
   // Whitelist allowed setting keys
-  return ["og_image", "totp_secret"].includes(key);
+  return ["og_image", "totp_secret", "completed_orders"].includes(key);
 }
 
 // Validate session token
@@ -462,6 +462,141 @@ serve(async (req) => {
         const { error } = await supabaseAdmin
           .from("site_settings")
           .upsert({ key, value: value || null }, { onConflict: "key" });
+        if (error) throw error;
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Store operations
+      case "get_store_orders": {
+        const { data: ordersData, error } = await supabaseAdmin
+          .from("store_orders")
+          .select("*, product:store_products(name)")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        return new Response(
+          JSON.stringify({ success: true, orders: ordersData }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "update_order_status": {
+        const { order_id, status } = data;
+
+        if (!order_id || !["accepted", "rejected"].includes(status)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid order_id or status." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        const { error } = await supabaseAdmin
+          .from("store_orders")
+          .update({ status, updated_at: new Date().toISOString() })
+          .eq("id", order_id);
+
+        if (error) throw error;
+
+        // If accepted, increment completed orders counter
+        if (status === "accepted") {
+          const { data: stats } = await supabaseAdmin
+            .from("store_stats")
+            .select("value")
+            .eq("key", "completed_orders")
+            .single();
+
+          const newCount = (stats?.value || 0) + 1;
+          await supabaseAdmin
+            .from("store_stats")
+            .update({ value: newCount, updated_at: new Date().toISOString() })
+            .eq("key", "completed_orders");
+        }
+
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "add_store_product": {
+        const { name, description, image_url, disclaimer, is_active, display_order } = data;
+
+        if (!name || typeof name !== "string" || name.trim().length === 0 || name.length > 200) {
+          return new Response(
+            JSON.stringify({ error: "Invalid product name. Must be 1-200 characters." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        if (image_url && !isValidUrl(image_url)) {
+          return new Response(
+            JSON.stringify({ error: "Invalid image URL." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        const { data: insertedProduct, error } = await supabaseAdmin
+          .from("store_products")
+          .insert({
+            name: sanitizeText(name, 200),
+            description: sanitizeText(description, 2000) || null,
+            image_url: image_url || null,
+            disclaimer: sanitizeText(disclaimer, 500) || null,
+            is_active: is_active ?? true,
+            display_order: display_order ?? 0,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        return new Response(
+          JSON.stringify({ success: true, product: insertedProduct }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "update_store_product": {
+        const { id, name, description, image_url, disclaimer, is_active, display_order } = data;
+
+        if (!id) {
+          return new Response(
+            JSON.stringify({ error: "Invalid product ID." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (name !== undefined) updates.name = sanitizeText(name, 200);
+        if (description !== undefined) updates.description = sanitizeText(description, 2000) || null;
+        if (image_url !== undefined) updates.image_url = image_url || null;
+        if (disclaimer !== undefined) updates.disclaimer = sanitizeText(disclaimer, 500) || null;
+        if (is_active !== undefined) updates.is_active = is_active;
+        if (display_order !== undefined) updates.display_order = display_order;
+
+        const { error } = await supabaseAdmin
+          .from("store_products")
+          .update(updates)
+          .eq("id", id);
+
+        if (error) throw error;
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "delete_store_product": {
+        if (!data.id) {
+          return new Response(
+            JSON.stringify({ error: "Invalid product ID." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        const { error } = await supabaseAdmin.from("store_products").delete().eq("id", data.id);
         if (error) throw error;
         return new Response(
           JSON.stringify({ success: true }),
