@@ -183,46 +183,41 @@ const StoreTab = () => {
         <div className="space-y-4">
           {products.map((product) => (
             <div key={product.id} className="glass-card rounded-2xl overflow-hidden">
-              {/* Product Header - Clickable */}
+              {/* Product Card - Clickable */}
               <button
                 onClick={() => handleProductClick(product.id)}
-                className="w-full p-4 flex items-center justify-between text-right"
+                className="w-full text-center"
               >
-                <div className="flex items-center gap-3">
-                  {product.image_url ? (
-                    <img
-                      src={product.image_url}
-                      alt={product.name}
-                      className="w-14 h-14 object-cover rounded-xl"
-                    />
-                  ) : (
-                    <div className="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center">
-                      <ShoppingBag className="text-primary" size={24} />
-                    </div>
-                  )}
-                  <div>
-                    <h3 className="font-semibold text-foreground text-sm">{product.name}</h3>
+                {/* Large Product Image */}
+                {product.image_url ? (
+                  <img
+                    src={product.image_url}
+                    alt={product.name}
+                    className="w-full h-48 object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-48 bg-primary/10 flex items-center justify-center">
+                    <ShoppingBag className="text-primary" size={48} />
+                  </div>
+                )}
+                
+                {/* Product Name */}
+                <div className="p-4 flex items-center justify-between">
+                  <div className="text-right">
+                    <h3 className="font-semibold text-foreground">{product.name}</h3>
                     <p className="text-xs text-muted-foreground">اضغط للتفاصيل</p>
                   </div>
+                  {expandedProduct === product.id ? (
+                    <ChevronUp className="text-muted-foreground" size={20} />
+                  ) : (
+                    <ChevronDown className="text-muted-foreground" size={20} />
+                  )}
                 </div>
-                {expandedProduct === product.id ? (
-                  <ChevronUp className="text-muted-foreground" size={20} />
-                ) : (
-                  <ChevronDown className="text-muted-foreground" size={20} />
-                )}
               </button>
 
               {/* Expanded Content */}
               {expandedProduct === product.id && (
                 <div className="px-4 pb-4 space-y-4">
-                  {/* Product Image */}
-                  {product.image_url && (
-                    <img
-                      src={product.image_url}
-                      alt={product.name}
-                      className="w-full h-48 object-cover rounded-xl"
-                    />
-                  )}
 
                   {/* Description */}
                   {product.description && (
